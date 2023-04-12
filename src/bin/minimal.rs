@@ -9,8 +9,6 @@ use rtic_usb_midi as _; // global logger + panicking-behavior + memory layout
 )]
 mod app {
     use defmt::println;
-    use midly_usb::live::{SystemCommon, SystemRealtime};
-    use midly_usb::{live::LiveEvent, MidiDevice, MidiMessage, UsbMidiPacket};
     use rtic::Monotonic;
     use stm32h7xx_hal::gpio::gpiob::{PB0, PB14};
     use stm32h7xx_hal::gpio::gpioc::PC13;
@@ -18,17 +16,11 @@ mod app {
     use stm32h7xx_hal::gpio::{Edge, ExtiPin, Input, Pull};
     use stm32h7xx_hal::gpio::{Output, PushPull};
     use stm32h7xx_hal::prelude::*;
-    use stm32h7xx_hal::rcc::rec::UsbClkSel;
-    use stm32h7xx_hal::usb_hs::{UsbBus, USB2};
     use systick_monotonic::{fugit::Duration, fugit::ExtU64, Systick};
-
-    use usb_device::prelude::*;
-
-    static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 
     // TODO: Add a monotonic if scheduling will be used
     #[monotonic(binds = SysTick, default = true)]
-    type Mono = Systick<1_000>;
+    type Mono = Systick<1_000_000>;
 
     use super::*;
 
@@ -42,10 +34,6 @@ mod app {
     // Local resources go here
     #[local]
     struct Local {
-        usb: (
-            UsbDevice<'static, UsbBus<USB2>>,
-            MidiDevice<'static, UsbBus<USB2>>,
-        ),
         // TODO: Add resources
         pb: PC13<Input>,
         ld1: PB0<Output<PushPull>>,
@@ -60,19 +48,11 @@ mod app {
         let pwrcfg = pwr.freeze();
 
         let rcc = cx.device.RCC.constrain();
-        let mut ccdr = rcc.sys_ck(80.MHz()).freeze(pwrcfg, &cx.device.SYSCFG);
+        let mut ccdr = rcc.sys_ck(180.MHz()).freeze(pwrcfg, &cx.device.SYSCFG);
 
         let systick = cx.core.SYST;
-        let mono = Mono::new(systick, 80_000_000);
-
-        let _ = ccdr.clocks.hsi48_ck().expect("HSI48 required");
-        ccdr.peripheral.kernel_usb_clk_mux(UsbClkSel::Hsi48);
-
+        let mono = Mono::new(systick, 180_000_000);
         // IO
-        let (usb_dm, usb_dp) = {
-            let gpioa = cx.device.GPIOA.split(ccdr.peripheral.GPIOA);
-            (gpioa.pa11.into_alternate(), gpioa.pa12.into_alternate())
-        };
         let pb = cx
             .device
             .GPIOC
@@ -89,29 +69,6 @@ mod app {
             .into_push_pull_output();
         let ld3 = gpiob.pb14.into_push_pull_output();
 
-        let usb = USB2::new(
-            cx.device.OTG2_HS_GLOBAL,
-            cx.device.OTG2_HS_DEVICE,
-            cx.device.OTG2_HS_PWRCLK,
-            usb_dm,
-            usb_dp,
-            ccdr.peripheral.USB2OTG,
-            &ccdr.clocks,
-        );
-
-        let usb_bus =
-            cortex_m::singleton!( : usb_device::class_prelude::UsbBusAllocator<UsbBus<USB2>> =
-                                            UsbBus::new(usb, unsafe { &mut EP_MEMORY} ) )
-            .unwrap();
-
-        let usb_midi = MidiDevice::new(usb_bus);
-        let usb_dev = UsbDeviceBuilder::new(usb_bus, UsbVidPid(0x16c0, 0x27dd))
-            .manufacturer("deltronix")
-            .product("tester")
-            .serial_number("test")
-            .device_class(midly_usb::class::USB_CLASS_AUDIO)
-            .build();
-        let usb = (usb_dev, usb_midi);
         task1::spawn_after(ExtU64::millis(1000));
 
         // Setup the monotonic timer
@@ -121,7 +78,6 @@ mod app {
                 // Initialization of shared resources go here
             },
             Local {
-                usb,
                 pb,
                 ld1,
                 ld3,
@@ -134,8 +90,9 @@ mod app {
     }
     #[idle]
     fn idle(_cx: idle::Context) -> ! {
+        defmt::info!("idle");
         loop {
-            core::hint::spin_loop();
+            cortex_m::asm::nop();
         }
     }
 
@@ -145,8 +102,8 @@ mod app {
         cx.shared.ld2.lock(|ld2| {
             ld2.set_high();
         });
-        let time = monotonics::now();
-        defmt::println!("task1! @ {}", time.ticks());
+        //let time = monotonics::now();
+        defmt::info!("task1! @ {}", monotonics::now().ticks());
         task2::spawn_after(ExtU64::millis(1000));
     }
 
@@ -155,80 +112,7 @@ mod app {
         cx.shared.ld2.lock(|ld2| {
             ld2.set_low();
         });
-        defmt::println!("task2!");
+        defmt::info!("task1! @ {}", monotonics::now().ticks());
         task1::spawn_after(ExtU64::millis(1000));
-    }
-
-    #[task(binds = OTG_FS, local = [usb,ld1])]
-    fn usb_event(mut cx: usb_event::Context) {
-        let (usb_dev, usb_midi) = &mut cx.local.usb;
-        cx.local.ld1.set_high();
-
-        loop {
-            if !usb_dev.poll(&mut [usb_midi]) {
-                cx.local.ld1.set_low();
-                return;
-            }
-
-            let mut buf = [0u8; 64];
-
-            match usb_midi.read(&mut buf) {
-                Ok(count) if count > 0 => {
-                    defmt::println!("{}", count);
-                    let mut write_offset = 0;
-                    let slice = &buf[0..count];
-                    slice.chunks(4).for_each(|packet| {
-                        defmt::println!(
-                            "{:X} {:X} {:X} {:X}",
-                            packet[0],
-                            packet[1],
-                            packet[2],
-                            packet[3]
-                        );
-
-                        let ube = UsbMidiPacket::read(packet);
-
-                        defmt::println!(
-                            "{:X} {:?}",
-                            ube.cable_number.as_int(),
-                            ube.code_index_number.as_int()
-                        );
-                        match ube.event {
-                            LiveEvent::Midi { channel, message } => match message {
-                                MidiMessage::NoteOn { key, vel } => {
-                                    defmt::println!("k: {}, v: {}", key.as_int(), vel.as_int());
-                                }
-                                MidiMessage::NoteOff { key, vel } => {
-                                    println!("k: {}, v: {}", key.as_int(), vel.as_int());
-                                }
-                                _ => {
-                                    defmt::println!("unimplemented midi message")
-                                }
-                            },
-                            LiveEvent::Realtime(status) => match status {
-                                SystemRealtime::TimingClock => {
-                                    defmt::println!("clk");
-                                }
-                                _ => {
-                                    defmt::println!("sys rt");
-                                }
-                            },
-                            _ => {
-                                defmt::println!("unimplemented midi event")
-                            }
-                        }
-                    });
-                    while write_offset < count {
-                        match usb_midi.write(&buf[write_offset..count]) {
-                            Ok(len) if len > 0 => {
-                                write_offset += len;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
     }
 }
