@@ -9,6 +9,7 @@ use rtic_usb_midi as _; // global logger + panicking-behavior + memory layout
 )]
 mod app {
     use defmt::println;
+    use dwt_systick_monotonic::{fugit::Duration, fugit::ExtU64, DwtSystick};
     use midly_usb::live::{SystemCommon, SystemRealtime};
     use midly_usb::{live::LiveEvent, MidiDevice, MidiMessage, UsbMidiPacket};
     use rtic::Monotonic;
@@ -20,15 +21,13 @@ mod app {
     use stm32h7xx_hal::prelude::*;
     use stm32h7xx_hal::rcc::rec::UsbClkSel;
     use stm32h7xx_hal::usb_hs::{UsbBus, USB2};
-    use systick_monotonic::{fugit::Duration, fugit::ExtU64, Systick};
-
     use usb_device::prelude::*;
 
     static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 
     // TODO: Add a monotonic if scheduling will be used
     #[monotonic(binds = SysTick, default = true)]
-    type Mono = Systick<1_000>;
+    type Mono = DwtSystick<80_000_000>;
 
     use super::*;
 
@@ -53,7 +52,7 @@ mod app {
     }
 
     #[init]
-    fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
+    fn init(mut cx: init::Context) -> (Shared, Local, init::Monotonics) {
         defmt::info!("init");
 
         let pwr = cx.device.PWR.constrain();
@@ -62,8 +61,11 @@ mod app {
         let rcc = cx.device.RCC.constrain();
         let mut ccdr = rcc.sys_ck(80.MHz()).freeze(pwrcfg, &cx.device.SYSCFG);
 
+        let dcb = &mut cx.core.DCB;
+        let dwt = cx.core.DWT;
+
         let systick = cx.core.SYST;
-        let mono = Mono::new(systick, 80_000_000);
+        let mono = Mono::new(dcb, dwt, systick, 80_000_000);
 
         let _ = ccdr.clocks.hsi48_ck().expect("HSI48 required");
         ccdr.peripheral.kernel_usb_clk_mux(UsbClkSel::Hsi48);
@@ -185,6 +187,7 @@ mod app {
                             packet[2],
                             packet[3]
                         );
+                        let now = monotonics::now().duration_since_epoch().to_millis();
 
                         let ube = UsbMidiPacket::read(packet);
 
