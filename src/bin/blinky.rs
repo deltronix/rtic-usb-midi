@@ -1,7 +1,7 @@
 #![no_main]
 #![no_std]
 
-use rtic_usb_midi as _; // global logger + panicking-behavior + memory layout
+use rtic_usb as _; // global logger + panicking-behavior + memory layout
 
 #[rtic::app(
     device = stm32h7xx_hal::pac, // TODO: Replace `some_hal::pac` with the path to the PAC

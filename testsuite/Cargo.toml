@@ -14,7 +14,7 @@ name = "test"
 harness = false
 
 [dependencies]
-rtic-usb-midi = { path = ".." }
+rtic_usb = { path = ".." }
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 defmt = "0.3.0"
