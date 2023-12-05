@@ -8,6 +8,7 @@ use rtic_usb as _; // global logger + panicking-behavior + memory layout
     device = stm32h7xx_hal::pac, // TODO: Replace `some_hal::pac` with the path to the PAC
     dispatchers = [SPI1],  // TODO: Replace the `FreeInterrupt1, ...` with free interrupt vectors if software tasks are used
 )]
+
 mod app {
     use defmt::println;
     use dwt_systick_monotonic::{fugit::Duration, fugit::ExtU64, DwtSystick};

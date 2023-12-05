@@ -145,21 +145,24 @@ mod app {
     // TODO: Add tasks
     #[task(shared = [ld2])]
     fn task1(mut cx: task1::Context) {
+        let time = monotonics::now();
+        task2::spawn_at(time + ExtU64::millis(1000));
+        //task2::spawn_after(ExtU64::millis(1000));
         cx.shared.ld2.lock(|ld2| {
             ld2.set_high();
         });
-        let time = monotonics::now();
-        defmt::println!("task1! @ {}", time.ticks());
-        task2::spawn_after(ExtU64::millis(1000));
+        defmt::println!("task1! @ {}", time.duration_since_epoch().to_millis());
+
     }
 
     #[task(shared = [ld2])]
     fn task2(mut cx: task2::Context) {
+        let time = monotonics::now();
+        task1::spawn_at(time + ExtU64::millis(1000));
         cx.shared.ld2.lock(|ld2| {
             ld2.set_low();
         });
         defmt::println!("task2!");
-        task1::spawn_after(ExtU64::millis(1000));
     }
 
     #[task(binds = OTG_FS, local = [usb,ld1])]

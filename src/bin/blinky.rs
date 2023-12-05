@@ -8,13 +8,13 @@ use rtic_usb as _; // global logger + panicking-behavior + memory layout
     dispatchers = [SPI1],  // TODO: Replace the `FreeInterrupt1, ...` with free interrupt vectors if software tasks are used
 )]
 mod app {
-    use defmt::println;
-    use dwt_systick_monotonic::{fugit::Duration, fugit::ExtU64, DwtSystick};
+    
+    use dwt_systick_monotonic::{fugit::ExtU64, DwtSystick};
     use rtic::Monotonic;
     use stm32h7xx_hal::gpio::gpiob::{PB0, PB14};
     use stm32h7xx_hal::gpio::gpioc::PC13;
     use stm32h7xx_hal::gpio::gpioe::PE1;
-    use stm32h7xx_hal::gpio::{Edge, ExtiPin, Input, Pull};
+    use stm32h7xx_hal::gpio::{ExtiPin, Input};
     use stm32h7xx_hal::gpio::{Output, PushPull};
     use stm32h7xx_hal::prelude::*;
 
@@ -22,7 +22,7 @@ mod app {
     #[monotonic(binds = SysTick, default = true)]
     type Mono = DwtSystick<80_000_000>;
 
-    use super::*;
+    
 
     // Shared resources go here
     #[shared]
@@ -48,7 +48,7 @@ mod app {
         let pwrcfg = pwr.freeze();
 
         let rcc = cx.device.RCC.constrain();
-        let mut ccdr = rcc.sys_ck(80.MHz()).freeze(pwrcfg, &cx.device.SYSCFG);
+        let ccdr = rcc.sys_ck(80.MHz()).freeze(pwrcfg, &cx.device.SYSCFG);
 
         let dcb = &mut cx.core.DCB;
         let dwt = cx.core.DWT;
