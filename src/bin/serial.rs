@@ -113,7 +113,7 @@ mod app {
             .device_class(USB_CLASS_CDC)
             .build();
         let usb = (usb_dev, usb_midi);
-        task1::spawn_after(ExtU64::millis(1000));
+        task1::spawn_after(ExtU64::millis(1000)).unwrap();
 
         // Setup the monotonic timer
         (
@@ -194,6 +194,5 @@ mod app {
                 _ => {}
             }
         }
- 
     }
 }
